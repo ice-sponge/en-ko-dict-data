@@ -83,6 +83,47 @@ def sounds(e):
     return {k: best.get(k, (0, None))[1] for k in ("ipa_us", "ipa_uk", "audio_us", "audio_uk")}
 
 
+# 쓰지 않는 옛/방언/비표준 변화형
+MARGINAL_TAGS = {"obsolete", "archaic", "dialectal", "nonstandard", "rare", "misspelling",
+                 "alternative", "table-tags", "inflection-template", "pronunciation-spelling"}
+
+# (키, 반드시 포함할 태그, 정확히 이 태그 집합이어야 하는지)
+FORM_RULES = [
+    ("3sg", {"present", "singular", "third-person"}, False),  # saves
+    ("past", {"past"}, True),                                  # saved
+    ("pp", {"participle", "past"}, False),                     # saved
+    ("ing", {"participle", "present"}, False),                 # saving
+    ("pl", {"plural"}, True),                                  # dictionaries
+    ("comp", {"comparative"}, True),                           # freer
+    ("sup", {"superlative"}, True),                            # freest
+]
+
+
+def forms(e):
+    """주요 변화형: {"3sg":"saves","past":"saved","pp":"saved","ing":"saving"} 등"""
+    out = {}
+    for f in e.get("forms", []):
+        form, tags = f.get("form"), set(f.get("tags", []))
+        if not form or form == "-" or tags & MARGINAL_TAGS:
+            continue
+        for key, need, exact in FORM_RULES:
+            if key in out:
+                continue
+            if (tags == need) if exact else need <= tags:
+                out[key] = form
+    return out
+
+
+def lemma(e):
+    """변화형 표제어의 원형 (saved -> save).
+    방언/옛 용법을 뺀 모든 뜻이 '~의 변화형'일 때만 연결한다 (cat -> catapult 같은 오연결 방지)."""
+    senses = [s for s in e.get("senses", []) if not set(s.get("tags", [])) & MARGINAL_TAGS]
+    if not senses or not all(s.get("form_of") for s in senses):
+        return None
+    w = senses[0]["form_of"][0].get("word")
+    return w if w and w != e["word"] else None
+
+
 def open_source():
     if SOURCE:
         return open(SOURCE, "rb")
@@ -105,7 +146,9 @@ def main():
             audio_us TEXT,
             audio_uk TEXT,
             ko       TEXT,   -- JSON 배열: 한국어 번역
-            glosses  TEXT    -- JSON 배열: 영어 뜻풀이 (최대 5개)
+            glosses  TEXT,   -- JSON 배열: 영어 뜻풀이 (최대 5개)
+            forms    TEXT,   -- JSON 객체: 변화형 {"3sg","past","pp","ing","pl","comp","sup"}
+            lemma    TEXT    -- 변화형 표제어의 원형 (saved -> save)
         );
         CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
         """
@@ -129,14 +172,17 @@ def main():
             if KO_ONLY and not ko:
                 continue
             snd = sounds(e)
+            fm = forms(e)
             con.execute(
-                "INSERT INTO entry(word,pos,ipa_us,ipa_uk,audio_us,audio_uk,ko,glosses)"
-                " VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT INTO entry(word,pos,ipa_us,ipa_uk,audio_us,audio_uk,ko,glosses,forms,lemma)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     e["word"], e.get("pos"),
                     snd["ipa_us"], snd["ipa_uk"], snd["audio_us"], snd["audio_uk"],
                     json.dumps(ko, ensure_ascii=False) if ko else None,
                     json.dumps(glosses[:5], ensure_ascii=False),
+                    json.dumps(fm, ensure_ascii=False) if fm else None,
+                    lemma(e),
                 ),
             )
             kept += 1

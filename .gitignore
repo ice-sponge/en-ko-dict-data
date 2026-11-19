@@ -3,3 +3,4 @@
 *.jsonl
 version.json
 __pycache__/
+*.db-journal

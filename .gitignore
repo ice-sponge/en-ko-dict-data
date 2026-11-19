@@ -1,0 +1,5 @@
+*.db
+*.db.gz
+*.jsonl
+version.json
+__pycache__/

@@ -1,0 +1,39 @@
+name: Build dictionary DB
+
+on:
+  schedule:
+    - cron: "0 18 1 * *"     # 매월 1일 03:00 (한국시간, UTC 18:00 전날)
+  workflow_dispatch:          # Actions 탭에서 수동 실행 버튼
+
+permissions:
+  contents: write             # Release 생성 권한
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build DB
+        run: python scripts/build_db.py
+        env:
+          KO_ONLY: "0"          # "1"로 바꾸면 한국어 번역 있는 단어만 저장
+          MIN_ENTRIES: "100000"
+
+      - name: Compress
+        run: gzip -9 dict.db
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="db-$(date +%Y%m%d)"
+          gh release create "$TAG" dict.db.gz version.json \
+            --title "$TAG" \
+            --notes "Auto build from kaikki.org English Wiktionary data (CC BY-SA 4.0)" \
+            --latest
